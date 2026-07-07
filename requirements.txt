@@ -1,0 +1,8 @@
+# Core deep learning
+torch>=2.2
+torchvision>=0.17
+# Numerics / data / plotting / config
+numpy>=1.26
+pandas>=2.0
+matplotlib>=3.8
+pyyaml>=6.0

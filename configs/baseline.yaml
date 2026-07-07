@@ -1,0 +1,25 @@
+# FedAvg baseline configuration.
+experiment:
+  name: baseline
+  seed: 0
+  results_dir: ./results
+
+data:
+  dataset: mnist
+  data_root: ./data
+  num_clients: 10
+  partition: iid          # iid | dirichlet
+  dirichlet_alpha: 0.5
+  batch_size: 64
+  test_batch_size: 1000
+
+model:
+  name: small_cnn         # small_cnn | mlp
+
+federated:
+  num_rounds: 30
+  local_epochs: 1
+  lr: 0.01
+  momentum: 0.9
+  client_fraction: 1.0
+  device: auto            # auto | cpu | mps | cuda
