@@ -1,7 +1,7 @@
 # Federated Learning Baseline (FedAvg on MNIST)
 
 **Module 1** of the capstone thesis *Hybrid Blockchain-Assisted Poisoning
-Detection in Federated Learning* — **Shudhatm Jain (25253301)**, School of
+Detection in Federated Learning* - **Shudhatm Jain (25253301)**, School of
 Computer Science, University of Galway. Supervisor: Dr. Malika Bendechache.
 
 This repository is the clean **federated learning baseline**: simulated clients
