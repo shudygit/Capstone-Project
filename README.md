@@ -7,8 +7,8 @@ Computer Science, University of Galway. Supervisor: Dr. Malika Bendechache.
 This repository is the clean **federated learning baseline**: simulated clients
 collaboratively train a small CNN on MNIST using **Federated Averaging (FedAvg)**,
 with no attacks and no defences. It is the reference point against which the
-later thesis modules — poisoning attacks, a blockchain audit ledger, and a
-z-score Byzantine filter — are evaluated.
+later thesis modules - poisoning attacks, a blockchain audit ledger, and a
+z-score Byzantine filter - are evaluated.
 
 ## What this module does
 
@@ -78,8 +78,8 @@ make test        # FedAvg unit tests + short end-to-end smoke run
 ## Roadmap (later thesis modules)
 
 1. **Baseline (this repo)** — FedAvg on MNIST, IID + non-IID. ✅
-2. Poisoning attacks — label flipping + gradient-noise injection.
-3. Blockchain ledger — SHA-256 hashes, RSA-2048 signatures, Proof-of-Work.
+2. Poisoning attacks -label flipping + gradient-noise injection.
+3. Blockchain ledger - SHA-256 hashes, RSA-2048 signatures, Proof-of-Work.
 4. Z-score Byzantine filter + the four-scenario evaluation.
 
 ## AI-use disclosure
