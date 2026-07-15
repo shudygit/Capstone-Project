@@ -77,9 +77,14 @@ def main() -> None:
     args = parse_args()
     cfg = load_config(args.config, overrides=build_overrides(args))
 
-    print(f"=== FedAvg baseline (seed={cfg.experiment.seed}) ===")
+    kind = "poisoned FedAvg" if cfg.attack.enabled else "FedAvg baseline"
+    print(f"=== {kind} (seed={cfg.experiment.seed}) ===")
     print(f"    clients={cfg.data.num_clients} partition={cfg.data.partition} "
           f"rounds={cfg.federated.num_rounds} model={cfg.model.name}")
+    if cfg.attack.enabled:
+        print(f"    attack: types={cfg.attack.types} "
+              f"malicious_fraction={cfg.attack.malicious_fraction} "
+              f"noise_sigma={cfg.attack.noise_sigma}")
 
     t0 = time.time()
     server = FederatedServer(cfg)
@@ -88,16 +93,20 @@ def main() -> None:
 
     results_dir = cfg.experiment.results_dir
     os.makedirs(results_dir, exist_ok=True)
-    tag = f"baseline_{cfg.data.partition}_seed{cfg.experiment.seed}"
+    kind_tag = "poisoned" if cfg.attack.enabled else "baseline"
+    tag = f"{kind_tag}_{cfg.data.partition}_seed{cfg.experiment.seed}"
 
     df = pd.DataFrame(history)
-    df.insert(0, "partition", cfg.data.partition)
-    df.insert(1, "seed", cfg.experiment.seed)
+    df.insert(0, "condition", kind_tag)
+    df.insert(1, "partition", cfg.data.partition)
+    df.insert(2, "seed", cfg.experiment.seed)
     csv_path = os.path.join(results_dir, f"{tag}.csv")
     df.to_csv(csv_path, index=False)
 
     summary = {
         "config": cfg.to_dict(),
+        "condition": kind_tag,
+        "malicious_clients": sorted(server.malicious),
         "final_acc": float(df["test_acc"].iloc[-1]),
         "best_acc": float(df["test_acc"].max()),
         "mean_train_time": float(df["train_time"].mean()),

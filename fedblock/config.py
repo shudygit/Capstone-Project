@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -42,17 +42,35 @@ class FederatedConfig:
 
 
 @dataclass
+class AttackConfig:
+    """Module 2: poisoning attacks against the FedAvg baseline."""
+    enabled: bool = False
+    # malicious clients are split across the enabled attack types
+    types: List[str] = field(default_factory=lambda: ["label_flip", "gradient_noise"])
+    malicious_fraction: float = 0.3
+    # label flipping
+    label_flip_source: int = 7
+    label_flip_target: int = 1
+    label_flip_all: bool = False     # if True, map every label l -> (9 - l)
+    # gradient / weight noise injection
+    noise_sigma: float = 0.8         # std of Gaussian weight noise (clearly anomalous)
+    noise_scale: float = 1.0         # multiplicative scaling of the update
+
+
+@dataclass
 class Config:
     experiment: ExperimentConfig = field(default_factory=ExperimentConfig)
     data: DataConfig = field(default_factory=DataConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     federated: FederatedConfig = field(default_factory=FederatedConfig)
+    attack: AttackConfig = field(default_factory=AttackConfig)
 
     _SECTIONS = {
         "experiment": ExperimentConfig,
         "data": DataConfig,
         "model": ModelConfig,
         "federated": FederatedConfig,
+        "attack": AttackConfig,
     }
 
     @classmethod

@@ -18,6 +18,7 @@ from typing import Dict, List
 import numpy as np
 
 from .aggregator import fedavg
+from .attacks import assign_attack_roles
 from .client import Client
 from .config import Config
 from .data import (load_mnist, make_client_subsets, make_test_loader,
@@ -39,8 +40,13 @@ class FederatedServer:
         shards = make_client_subsets(train, idx)
         self.test_loader = make_test_loader(test, cfg.data.test_batch_size)
 
+        # Module 2: designate malicious clients and their attack types.
+        self.roles = assign_attack_roles(cfg.data.num_clients, cfg.attack,
+                                         cfg.experiment.seed)
+        self.malicious = set(self.roles.keys())
         self.clients: List[Client] = [
-            Client(cid, shards[cid]) for cid in range(cfg.data.num_clients)
+            Client(cid, shards[cid], self.roles.get(cid), cfg.attack)
+            for cid in range(cfg.data.num_clients)
         ]
 
         self.model = build_model(cfg.model.name).to(self.device)
@@ -63,7 +69,7 @@ class FederatedServer:
         for cid in participating:
             upd, n = self.clients[cid].local_train(
                 self.global_state, self.model, self.cfg.federated,
-                self.cfg.data.batch_size, self.device)
+                self.cfg.data.batch_size, self.device, round_idx)
             updates.append((upd, n))
         train_time = time.perf_counter() - t_train
 
@@ -76,6 +82,7 @@ class FederatedServer:
             "test_acc": acc,
             "test_loss": loss,
             "num_participating": len(participating),
+            "num_malicious_participating": len(set(participating) & self.malicious),
             "train_time": train_time,
             "round_time": train_time,
         }
@@ -83,10 +90,14 @@ class FederatedServer:
         return record
 
     def run(self, verbose: bool = True) -> List[Dict]:
+        tag = "poisoned" if self.cfg.attack.enabled else "baseline"
+        if verbose and self.malicious:
+            print(f"Malicious clients: {sorted(self.malicious)} "
+                  f"({ {c: self.roles[c] for c in sorted(self.malicious)} })", flush=True)
         for r in range(self.cfg.federated.num_rounds):
             rec = self.run_round(r)
             if verbose:
-                print(f"[baseline] round {r:3d} | acc={rec['test_acc']:.4f} "
+                print(f"[{tag}] round {r:3d} | acc={rec['test_acc']:.4f} "
                       f"loss={rec['test_loss']:.4f} | t_train={rec['train_time']:.2f}s",
                       flush=True)
         return self.history
