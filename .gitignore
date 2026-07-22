@@ -2,8 +2,17 @@
 venv/
 __pycache__/
 *.pyc
-data/
 results/
 figures/
 .pytest_cache/
 .DS_Store
+
+# MNIST ships with the repo so the project runs fully offline.
+# Keep the compressed source files; ignore the large extracted copies,
+# which are regenerated locally on first run.
+data/*
+!data/MNIST/
+data/MNIST/*
+!data/MNIST/raw/
+data/MNIST/raw/*
+!data/MNIST/raw/*.gz

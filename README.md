@@ -55,9 +55,14 @@ python3.12 -m venv .venv
 #  or:  make install
 ```
 
-> PyTorch selects the best device automatically (CUDA -> Apple MPS -> CPU). MNIST
-> downloads on first run into `./data`. Python 3.12 is recommended for stable
-> PyTorch wheels.
+> PyTorch selects the best device automatically (CUDA -> Apple MPS -> CPU).
+> Python 3.12 is recommended for stable PyTorch wheels.
+
+**The dataset ships with this repository.** MNIST lives in `data/MNIST/raw` and is
+loaded strictly from local files: no download, no network access and no SSL
+handshake is ever performed. The project therefore runs fully offline. The
+compressed `.gz` files are version-controlled and are extracted automatically on
+first run.
 
 ## Usage
 

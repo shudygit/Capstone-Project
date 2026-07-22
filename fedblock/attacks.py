@@ -18,6 +18,7 @@ from collections import OrderedDict
 from typing import Dict, List
 
 import torch
+
 from torch.utils.data import Dataset
 
 from .config import AttackConfig

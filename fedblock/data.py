@@ -1,6 +1,14 @@
-"""MNIST loading and IID / non-IID (Dirichlet) client partitioning."""
+"""MNIST loading and IID / non-IID (Dirichlet) client partitioning.
+
+The dataset is loaded strictly from local files that ship with the repository.
+No network access, no SSL handshake and no download is ever performed, so the
+experiments run identically offline and on a locked-down machine.
+"""
 from __future__ import annotations
 
+import gzip
+import os
+import shutil
 from typing import List, Tuple
 
 import numpy as np
@@ -10,6 +18,17 @@ from torchvision import datasets, transforms
 # MNIST channel statistics used by virtually all reference implementations.
 _MNIST_MEAN, _MNIST_STD = 0.1307, 0.3081
 
+# Project root = the folder containing the `fedblock` package.
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+
+# The four raw IDX files torchvision expects inside <root>/MNIST/raw.
+_MNIST_FILES = (
+    "train-images-idx3-ubyte",
+    "train-labels-idx1-ubyte",
+    "t10k-images-idx3-ubyte",
+    "t10k-labels-idx1-ubyte",
+)
+
 
 def _transform() -> transforms.Compose:
     return transforms.Compose([
@@ -18,11 +37,53 @@ def _transform() -> transforms.Compose:
     ])
 
 
+def resolve_data_root(data_root: str) -> str:
+    """Make ``data_root`` absolute, resolving relative paths against the project root.
+
+    This means experiments work no matter which directory you launch them from.
+    """
+    if os.path.isabs(data_root):
+        return data_root
+    return os.path.normpath(os.path.join(_PROJECT_ROOT, data_root))
+
+
+def _ensure_extracted(raw_dir: str) -> None:
+    """Decompress any bundled ``.gz`` files that have no extracted counterpart.
+
+    Purely local: it only ever reads ``.gz`` files already on disk.
+    """
+    for name in _MNIST_FILES:
+        target = os.path.join(raw_dir, name)
+        archive = target + ".gz"
+        if not os.path.exists(target) and os.path.exists(archive):
+            with gzip.open(archive, "rb") as src, open(target, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+
+
 def load_mnist(data_root: str) -> Tuple[Dataset, Dataset]:
-    """Download (if needed) and return the MNIST train and test datasets."""
+    """Return the MNIST train and test datasets from local files only.
+
+    Raises a clear error if the bundled dataset is missing, rather than silently
+    attempting an online download.
+    """
+    root = resolve_data_root(data_root)
+    raw_dir = os.path.join(root, "MNIST", "raw")
+    _ensure_extracted(raw_dir)
+
+    missing = [n for n in _MNIST_FILES if not os.path.exists(os.path.join(raw_dir, n))]
+    if missing:
+        raise FileNotFoundError(
+            f"MNIST data not found in {raw_dir}.\n"
+            f"Missing files: {missing}\n"
+            "The dataset ships with this repository under data/MNIST/raw. "
+            "Restore that folder (or copy it from the repo) and re-run. "
+            "No download is attempted by design."
+        )
+
     tfm = _transform()
-    train = datasets.MNIST(data_root, train=True, download=True, transform=tfm)
-    test = datasets.MNIST(data_root, train=False, download=True, transform=tfm)
+    # download=False guarantees torchvision never opens a network connection.
+    train = datasets.MNIST(root, train=True, download=False, transform=tfm)
+    test = datasets.MNIST(root, train=False, download=False, transform=tfm)
     return train, test
 
 
