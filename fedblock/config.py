@@ -59,12 +59,30 @@ class AttackConfig:
 
 
 @dataclass
+class BlockchainConfig:
+    """Module 3: blockchain ledger that records and audits every client update."""
+    enabled: bool = False
+    difficulty: int = 3              # Proof-of-Work: required leading zeros in the hash
+    rsa_key_bits: int = 2048         # size of each client's signing key
+
+
+@dataclass
+class DefenseConfig:
+    """Module 4: z-score anomaly filter that drops outlier updates before averaging."""
+    enabled: bool = False
+    z_threshold: float = 2.5         # a weight is 'extreme' if |z-score| exceeds this (epsilon)
+    fraction_threshold: float = 0.05  # flag a client if this fraction of its weights are extreme (tau)
+
+
+@dataclass
 class Config:
     experiment: ExperimentConfig = field(default_factory=ExperimentConfig)
     data: DataConfig = field(default_factory=DataConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     federated: FederatedConfig = field(default_factory=FederatedConfig)
     attack: AttackConfig = field(default_factory=AttackConfig)
+    blockchain: BlockchainConfig = field(default_factory=BlockchainConfig)
+    defense: DefenseConfig = field(default_factory=DefenseConfig)
 
     _SECTIONS = {
         "experiment": ExperimentConfig,
@@ -72,6 +90,8 @@ class Config:
         "model": ModelConfig,
         "federated": FederatedConfig,
         "attack": AttackConfig,
+        "blockchain": BlockchainConfig,
+        "defense": DefenseConfig,
     }
 
     @classmethod

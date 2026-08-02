@@ -20,7 +20,7 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from fedblock.config import load_config  # noqa: E402
-from fedblock.server import FederatedServer  # noqa: E402
+from fedblock.server import FederatedServer, scenario_name  # noqa: E402
 
 
 def _coerce(value: str):
@@ -62,8 +62,9 @@ def build_overrides(args: argparse.Namespace) -> dict:
     if args.device is not None:
         o.setdefault("federated", {})["device"] = args.device
     if args.quick:
+        # Keep 10 clients: with a mean/std z-score, a single outlier's |z| cannot
+        # exceed (N-1)/sqrt(N), so fewer clients would hide the filter's detection.
         o.setdefault("federated", {})["num_rounds"] = args.rounds or 3
-        o.setdefault("data", {})["num_clients"] = 6
     for item in args.overrides:
         if "=" not in item or "." not in item.split("=", 1)[0]:
             raise SystemExit(f"--set expects 'section.key=value', got '{item}'")
@@ -77,14 +78,12 @@ def main() -> None:
     args = parse_args()
     cfg = load_config(args.config, overrides=build_overrides(args))
 
-    kind = "poisoned FedAvg" if cfg.attack.enabled else "FedAvg baseline"
-    print(f"=== {kind} (seed={cfg.experiment.seed}) ===")
+    scenario = scenario_name(cfg)
+    print(f"=== scenario '{scenario}' (seed={cfg.experiment.seed}) ===")
     print(f"    clients={cfg.data.num_clients} partition={cfg.data.partition} "
           f"rounds={cfg.federated.num_rounds} model={cfg.model.name}")
-    if cfg.attack.enabled:
-        print(f"    attack: types={cfg.attack.types} "
-              f"malicious_fraction={cfg.attack.malicious_fraction} "
-              f"noise_sigma={cfg.attack.noise_sigma}")
+    print(f"    attack={cfg.attack.enabled} blockchain={cfg.blockchain.enabled} "
+          f"defense={cfg.defense.enabled}")
 
     t0 = time.time()
     server = FederatedServer(cfg)
@@ -93,11 +92,10 @@ def main() -> None:
 
     results_dir = cfg.experiment.results_dir
     os.makedirs(results_dir, exist_ok=True)
-    kind_tag = "poisoned" if cfg.attack.enabled else "baseline"
-    tag = f"{kind_tag}_{cfg.data.partition}_seed{cfg.experiment.seed}"
+    tag = f"{scenario}_{cfg.data.partition}_seed{cfg.experiment.seed}"
 
     df = pd.DataFrame(history)
-    df.insert(0, "condition", kind_tag)
+    df.insert(0, "scenario", scenario)
     df.insert(1, "partition", cfg.data.partition)
     df.insert(2, "seed", cfg.experiment.seed)
     csv_path = os.path.join(results_dir, f"{tag}.csv")
@@ -105,11 +103,17 @@ def main() -> None:
 
     summary = {
         "config": cfg.to_dict(),
-        "condition": kind_tag,
+        "scenario": scenario,
         "malicious_clients": sorted(server.malicious),
         "final_acc": float(df["test_acc"].iloc[-1]),
         "best_acc": float(df["test_acc"].max()),
+        "mean_detection_rate": float(df["detection_rate"].mean()),
+        "mean_false_positive_rate": float(df["false_positive_rate"].mean()),
         "mean_train_time": float(df["train_time"].mean()),
+        "mean_blockchain_time": float(df["blockchain_time"].mean()),
+        "mean_defense_time": float(df["defense_time"].mean()),
+        "blockchain_blocks": len(server.chain) if server.chain else 0,
+        "blockchain_valid": server.chain.is_valid() if server.chain else None,
         "wall_seconds": wall,
     }
     with open(os.path.join(results_dir, f"{tag}_summary.json"), "w") as f:
@@ -117,6 +121,13 @@ def main() -> None:
 
     print(f"\nFinished in {wall:.1f}s | final acc={summary['final_acc']:.4f} "
           f"| best acc={summary['best_acc']:.4f}")
+    if cfg.defense.enabled:
+        print(f"Detection rate={summary['mean_detection_rate']:.2f} "
+              f"FPR={summary['mean_false_positive_rate']:.2f}")
+    if cfg.blockchain.enabled:
+        print(f"Blockchain: {summary['blockchain_blocks']} blocks, "
+              f"valid={summary['blockchain_valid']}, "
+              f"mean overhead={summary['mean_blockchain_time']:.3f}s/round")
     print(f"Saved: {csv_path}")
 
 

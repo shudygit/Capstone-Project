@@ -1,16 +1,17 @@
 PY ?= ./.venv/bin/python
 
-.PHONY: help install smoke run iid noniid poisoned compare figures test clean
+.PHONY: help install smoke run iid noniid poisoned all figures tables test clean
 
 help:
 	@echo "make install   - create venv and install dependencies"
-	@echo "make smoke      - fast baseline smoke run (3 rounds)"
+	@echo "make smoke      - fast smoke run of all 4 scenarios (few rounds)"
 	@echo "make run        - full IID baseline (30 rounds)"
 	@echo "make iid        - IID baseline"
 	@echo "make noniid     - non-IID (Dirichlet) baseline"
 	@echo "make poisoned   - poisoned FedAvg (attacks, no defence)"
-	@echo "make compare    - baseline + poisoned + figures (degradation study)"
-	@echo "make figures    - plot accuracy/loss curves from results/"
+	@echo "make all        - run all 4 scenarios + figures + summary table"
+	@echo "make figures    - build the four-scenario figures from results/"
+	@echo "make tables     - build the summary table (CSV + LaTeX) from results/"
 	@echo "make test       - run unit + smoke tests"
 	@echo "make clean      - remove results/ and figures/"
 
@@ -20,7 +21,7 @@ install:
 	$(PY) -m pip install -r requirements.txt
 
 smoke:
-	$(PY) scripts/run_experiment.py --quick
+	$(PY) scripts/run_all.py --quick
 
 run: iid
 
@@ -34,13 +35,16 @@ noniid:
 poisoned:
 	$(PY) scripts/run_experiment.py --config configs/poisoned.yaml
 
-compare:
-	$(PY) scripts/run_experiment.py --config configs/baseline.yaml
-	$(PY) scripts/run_experiment.py --config configs/poisoned.yaml
+all:
+	$(PY) scripts/run_all.py
 	$(PY) scripts/make_figures.py
+	$(PY) scripts/make_tables.py
 
 figures:
 	$(PY) scripts/make_figures.py
+
+tables:
+	$(PY) scripts/make_tables.py
 
 test:
 	$(PY) -m pytest -q tests

@@ -1,0 +1,44 @@
+# Scenario (iii): Poisoned + blockchain only (Module 3).
+# The ledger records and audits every update, but nothing is filtered out.
+# Comparing (ii) poisoned vs (iii) shows what the blockchain alone contributes:
+# an audit trail and some overhead, but no change in accuracy.
+experiment:
+  name: blockchain_only
+  seed: 0
+  results_dir: ./results
+
+data:
+  dataset: mnist
+  data_root: ./data
+  num_clients: 10
+  partition: iid
+  dirichlet_alpha: 0.5
+  batch_size: 64
+  test_batch_size: 1000
+
+model:
+  name: small_cnn
+
+federated:
+  num_rounds: 30
+  local_epochs: 1
+  lr: 0.01
+  momentum: 0.9
+  client_fraction: 1.0
+  device: auto
+
+attack:
+  enabled: true
+  types: [label_flip, gradient_noise]
+  malicious_fraction: 0.3
+  label_flip_source: 7
+  label_flip_target: 1
+  noise_sigma: 0.8
+
+blockchain:
+  enabled: true
+  difficulty: 3
+  rsa_key_bits: 2048
+
+defense:
+  enabled: false

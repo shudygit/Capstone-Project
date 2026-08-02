@@ -1,14 +1,20 @@
-"""Federated server: orchestrates FedAvg rounds over simulated clients.
+"""Federated server: orchestrates the rounds and the four-scenario logic.
 
 Each round the server:
-  1. samples a fraction of clients;
-  2. broadcasts the current global model;
-  3. collects each client's locally-trained update;
-  4. FedAvg-aggregates the updates (weighted by sample count);
-  5. evaluates the new global model on the held-out test set.
+  1. samples a fraction of clients and broadcasts the global model;
+  2. collects each client's locally-trained update (honest or poisoned);
+  3. (Module 3, if the blockchain is on) has each client sign its update, verifies
+     the signature, records a SHA-256 transaction, and mines a block - timing each
+     step so the ledger overhead can be reported;
+  4. (Module 4, if the defence is on) runs the z-score filter and drops the
+     flagged clients;
+  5. FedAvg-averages the surviving updates and evaluates the new global model.
 
-This is the clean baseline against which the later poisoning-defence modules
-are compared.
+The four scenarios are just combinations of switches in the config:
+    baseline           : attack off, blockchain off, defence off
+    poisoned_nodefense : attack on,  blockchain off, defence off
+    blockchain_only    : attack on,  blockchain on,  defence off
+    full_hybrid        : attack on,  blockchain on,  defence on
 """
 from __future__ import annotations
 
@@ -19,18 +25,33 @@ import numpy as np
 
 from .aggregator import fedavg
 from .attacks import assign_attack_roles
+from .blockchain import (Blockchain, KeyRegistry, LedgerRoundStats, Transaction,
+                         sha256_hex, verify_signature)
 from .client import Client
 from .config import Config
 from .data import (load_mnist, make_client_subsets, make_test_loader,
                    partition_data)
-from .metrics import evaluate
+from .defense import zscore_filter
+from .metrics import detection_metrics, evaluate
 from .models import build_model
-from .utils import clone_state, resolve_device, set_seed
+from .utils import clone_state, resolve_device, set_seed, state_to_bytes
+
+
+def scenario_name(cfg: Config) -> str:
+    """Human-readable label for the scenario described by the config switches."""
+    if not cfg.attack.enabled:
+        return "baseline"
+    if not cfg.blockchain.enabled and not cfg.defense.enabled:
+        return "poisoned_nodefense"
+    if cfg.blockchain.enabled and not cfg.defense.enabled:
+        return "blockchain_only"
+    return "full_hybrid"
 
 
 class FederatedServer:
     def __init__(self, cfg: Config):
         self.cfg = cfg
+        self.scenario = scenario_name(cfg)
         set_seed(cfg.experiment.seed)
         self.device = resolve_device(cfg.federated.device)
 
@@ -49,6 +70,15 @@ class FederatedServer:
             for cid in range(cfg.data.num_clients)
         ]
 
+        # Module 3: give every client a signing key and start the ledger.
+        self.keys = None
+        self.chain = None
+        if cfg.blockchain.enabled:
+            self.keys = KeyRegistry(cfg.blockchain.rsa_key_bits)
+            for cid in range(cfg.data.num_clients):
+                self.keys.register(cid)
+            self.chain = Blockchain(difficulty=cfg.blockchain.difficulty)
+
         self.model = build_model(cfg.model.name).to(self.device)
         self.global_state = clone_state(self.model.state_dict())
         self.history: List[Dict] = []
@@ -61,21 +91,94 @@ class FederatedServer:
         rng = np.random.default_rng(self.cfg.experiment.seed + round_idx)
         return sorted(rng.choice(self.cfg.data.num_clients, size=n, replace=False).tolist())
 
+    def _record_on_ledger(self, round_idx: int,
+                          updates: Dict[int, Dict], sample_counts: Dict[int, int]):
+        """Sign, verify, hash and mine the round's updates. Returns (stats, accepted).
+
+        'accepted' are the clients whose signature verified; only those go forward.
+        Timing is split by step so the overhead can be reported.
+        """
+        stats = LedgerRoundStats()
+        txs: List[Transaction] = []
+        accepted: List[int] = []
+
+        for cid in sorted(updates):
+            # Hash the update.
+            t0 = time.perf_counter()
+            weight_hash = sha256_hex(state_to_bytes(updates[cid]))
+            stats.hash_time += time.perf_counter() - t0
+
+            # Client signs the hash with its private key.
+            t0 = time.perf_counter()
+            signature = self.keys.register(cid).sign(weight_hash.encode())
+            stats.sign_time += time.perf_counter() - t0
+
+            # Server verifies the signature with the client's public key.
+            t0 = time.perf_counter()
+            ok = verify_signature(self.keys.public_key(cid), weight_hash.encode(), signature)
+            stats.verify_time += time.perf_counter() - t0
+
+            txs.append(Transaction(cid, round_idx, weight_hash, sample_counts[cid],
+                                   signature.hex(), accepted=ok))
+            if ok:
+                accepted.append(cid)
+            else:
+                stats.num_rejected += 1
+
+        # Mine the block that seals this round's transactions.
+        t0 = time.perf_counter()
+        self.chain.add_block(txs)
+        stats.mine_time += time.perf_counter() - t0
+        stats.num_transactions = len(txs)
+        return stats, accepted
+
     def run_round(self, round_idx: int) -> Dict:
+        cfg = self.cfg
         participating = self._select_clients(round_idx)
 
+        # 1) Local training -------------------------------------------------
         t_train = time.perf_counter()
-        updates = []
+        updates: Dict[int, Dict] = {}
+        sample_counts: Dict[int, int] = {}
         for cid in participating:
             upd, n = self.clients[cid].local_train(
-                self.global_state, self.model, self.cfg.federated,
-                self.cfg.data.batch_size, self.device, round_idx)
-            updates.append((upd, n))
+                self.global_state, self.model, cfg.federated,
+                cfg.data.batch_size, self.device, round_idx)
+            updates[cid] = upd
+            sample_counts[cid] = n
         train_time = time.perf_counter() - t_train
 
-        self.global_state = fedavg(updates)
+        # 2) Blockchain logging (Module 3) ----------------------------------
+        blockchain_time = 0.0
+        candidates = list(updates.keys())
+        if cfg.blockchain.enabled:
+            stats, accepted = self._record_on_ledger(round_idx, updates, sample_counts)
+            blockchain_time = stats.total_time
+            candidates = accepted            # only signature-valid updates continue
+
+        # 3) Z-score filter (Module 4) --------------------------------------
+        flagged: List[int] = []
+        defense_time = 0.0
+        if cfg.defense.enabled:
+            t0 = time.perf_counter()
+            result = zscore_filter(
+                {c: updates[c] for c in candidates},
+                z_threshold=cfg.defense.z_threshold,
+                fraction_threshold=cfg.defense.fraction_threshold)
+            defense_time = time.perf_counter() - t0
+            flagged = result.flagged
+
+        keep = [c for c in candidates if c not in set(flagged)]
+        if not keep:                          # safety net: never drop everyone
+            keep = candidates
+
+        # 4) Aggregate + evaluate ------------------------------------------
+        self.global_state = fedavg([(updates[c], sample_counts[c]) for c in keep])
         self.model.load_state_dict(self.global_state)
         acc, loss = evaluate(self.model, self.test_loader, self.device)
+
+        # 5) Detection metrics ---------------------------------------------
+        det = detection_metrics(set(flagged), self.malicious, set(participating))
 
         record = {
             "round": round_idx,
@@ -83,21 +186,32 @@ class FederatedServer:
             "test_loss": loss,
             "num_participating": len(participating),
             "num_malicious_participating": len(set(participating) & self.malicious),
+            "num_flagged": len(flagged),
+            "num_aggregated": len(keep),
+            "detection_rate": det.detection_rate,
+            "false_positive_rate": det.false_positive_rate,
+            "tp": det.tp, "fp": det.fp, "tn": det.tn, "fn": det.fn,
             "train_time": train_time,
-            "round_time": train_time,
+            "blockchain_time": blockchain_time,
+            "defense_time": defense_time,
+            "round_time": train_time + blockchain_time + defense_time,
         }
         self.history.append(record)
         return record
 
     def run(self, verbose: bool = True) -> List[Dict]:
-        tag = "poisoned" if self.cfg.attack.enabled else "baseline"
         if verbose and self.malicious:
             print(f"Malicious clients: {sorted(self.malicious)} "
                   f"({ {c: self.roles[c] for c in sorted(self.malicious)} })", flush=True)
         for r in range(self.cfg.federated.num_rounds):
             rec = self.run_round(r)
             if verbose:
-                print(f"[{tag}] round {r:3d} | acc={rec['test_acc']:.4f} "
-                      f"loss={rec['test_loss']:.4f} | t_train={rec['train_time']:.2f}s",
+                print(f"[{self.scenario}] round {r:3d} | acc={rec['test_acc']:.4f} "
+                      f"loss={rec['test_loss']:.4f} | flagged={rec['num_flagged']} "
+                      f"(DR={rec['detection_rate']:.2f} FPR={rec['false_positive_rate']:.2f}) "
+                      f"| t_train={rec['train_time']:.2f}s t_chain={rec['blockchain_time']:.3f}s",
                       flush=True)
+        # A tampered or broken chain must never pass silently.
+        if self.chain is not None and not self.chain.is_valid():
+            raise RuntimeError("Blockchain integrity check failed after the run!")
         return self.history
