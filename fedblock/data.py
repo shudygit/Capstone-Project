@@ -1,15 +1,10 @@
-"""MNIST loading and IID / non-IID (Dirichlet) client partitioning.
-
-The dataset is loaded strictly from local files that ship with the repository.
-No network access, no SSL handshake and no download is ever performed, so the
-experiments run identically offline and on a locked-down machine.
-"""
+"""MNIST loading and IID / non-IID (Dirichlet) client partitioning."""
 from __future__ import annotations
 
 import gzip
 import os
 import shutil
-from typing import List, Tuple
+from typing import List
 
 import numpy as np
 from torch.utils.data import DataLoader, Dataset, Subset
@@ -30,14 +25,14 @@ _MNIST_FILES = (
 )
 
 
-def _transform() -> transforms.Compose:
+def _transform():
     return transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((_MNIST_MEAN,), (_MNIST_STD,)),
     ])
 
 
-def resolve_data_root(data_root: str) -> str:
+def resolve_data_root(data_root: str):
     """Make ``data_root`` absolute, resolving relative paths against the project root.
 
     This means experiments work no matter which directory you launch them from.
@@ -47,7 +42,7 @@ def resolve_data_root(data_root: str) -> str:
     return os.path.normpath(os.path.join(_PROJECT_ROOT, data_root))
 
 
-def _ensure_extracted(raw_dir: str) -> None:
+def _ensure_extracted(raw_dir: str):
     """Decompress any bundled ``.gz`` files that have no extracted counterpart.
 
     Purely local: it only ever reads ``.gz`` files already on disk.
@@ -60,7 +55,7 @@ def _ensure_extracted(raw_dir: str) -> None:
                 shutil.copyfileobj(src, dst)
 
 
-def load_mnist(data_root: str) -> Tuple[Dataset, Dataset]:
+def load_mnist(data_root: str):
     """Return the MNIST train and test datasets from local files only.
 
     Raises a clear error if the bundled dataset is missing, rather than silently
@@ -87,7 +82,7 @@ def load_mnist(data_root: str) -> Tuple[Dataset, Dataset]:
     return train, test
 
 
-def iid_partition(train: Dataset, num_clients: int, seed: int) -> List[List[int]]:
+def iid_partition(train: Dataset, num_clients: int, seed: int):
     """Shuffle and split indices into ``num_clients`` equal IID shards."""
     rng = np.random.default_rng(seed)
     idx = rng.permutation(len(train))
@@ -95,7 +90,7 @@ def iid_partition(train: Dataset, num_clients: int, seed: int) -> List[List[int]
 
 
 def dirichlet_partition(train: Dataset, num_clients: int, alpha: float,
-                        seed: int) -> List[List[int]]:
+                        seed: int):
     """Non-IID partition: each client's class proportions drawn from Dir(alpha).
 
     Smaller ``alpha`` => more skewed (less IID) client distributions. This is the
@@ -120,7 +115,7 @@ def dirichlet_partition(train: Dataset, num_clients: int, alpha: float,
 
 
 def partition_data(train: Dataset, num_clients: int, partition: str,
-                   dirichlet_alpha: float, seed: int) -> List[List[int]]:
+                   dirichlet_alpha: float, seed: int):
     if partition == "iid":
         return iid_partition(train, num_clients, seed)
     if partition == "dirichlet":
@@ -128,10 +123,9 @@ def partition_data(train: Dataset, num_clients: int, partition: str,
     raise ValueError(f"Unknown partition '{partition}' (expected 'iid' or 'dirichlet')")
 
 
-def make_client_subsets(train: Dataset, client_indices: List[List[int]]) -> List[Subset]:
-    """Return one Subset per client."""
+def make_client_subsets(train: Dataset, client_indices: List[List[int]]):
     return [Subset(train, idx) for idx in client_indices]
 
 
-def make_test_loader(test: Dataset, batch_size: int) -> DataLoader:
+def make_test_loader(test: Dataset, batch_size: int):
     return DataLoader(test, batch_size=batch_size, shuffle=False)

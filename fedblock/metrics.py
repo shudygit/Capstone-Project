@@ -1,8 +1,6 @@
 """Evaluation metrics for the global model."""
 from __future__ import annotations
-
 from typing import Tuple
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,7 +8,7 @@ from torch.utils.data import DataLoader
 
 
 @torch.no_grad()
-def evaluate(model: nn.Module, loader: DataLoader, device: torch.device) -> Tuple[float, float]:
+def evaluate(model: nn.Module, loader: DataLoader, device: torch.device):
     """Return (test_accuracy, average_loss) on the global test set."""
     model.eval()
     model.to(device)

@@ -41,9 +41,10 @@ class FederatedConfig:
     device: str = "auto"
 
 
+"""Module 2: poisoning attacks against the FedAvg baseline."""
+
 @dataclass
 class AttackConfig:
-    """Module 2: poisoning attacks against the FedAvg baseline."""
     enabled: bool = False
     # malicious clients are split across the enabled attack types
     types: List[str] = field(default_factory=lambda: ["label_flip", "gradient_noise"])

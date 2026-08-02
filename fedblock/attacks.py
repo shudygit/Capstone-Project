@@ -13,20 +13,14 @@ At this stage there is no defence: these attacks are used to measure how much th
 FedAvg baseline degrades under adversarial clients (baseline vulnerability).
 """
 from __future__ import annotations
-
 from collections import OrderedDict
 from typing import Dict, List
-
 import torch
-
 from torch.utils.data import Dataset
-
 from .config import AttackConfig
-
 
 class LabelFlipDataset(Dataset):
     """Wraps a dataset and remaps labels for a label-flipping attack.
-
     Either flips a single source class to a target class, or (if ``flip_all``)
     maps every label ``l -> 9 - l``.
     """
@@ -50,11 +44,10 @@ class LabelFlipDataset(Dataset):
         return x, y
 
 
-def assign_attack_roles(num_clients: int, cfg: AttackConfig, seed: int) -> Dict[int, str]:
+def assign_attack_roles(num_clients: int, cfg: AttackConfig, seed: int):
     """Decide which clients are malicious and which attack each one runs.
-
     Returns a dict mapping client_id -> attack_type for malicious clients only
-    ("label_flip" or "gradient_noise"); honest clients are absent from the map.
+    ("label_flip" or "gradient_noise"); honest clients are untouched and not mapped.
     Malicious clients are split as evenly as possible across the enabled attacks.
     """
     if not cfg.enabled or cfg.malicious_fraction <= 0:
@@ -73,9 +66,8 @@ def assign_attack_roles(num_clients: int, cfg: AttackConfig, seed: int) -> Dict[
     return roles
 
 
-def apply_gradient_noise(state: Dict[str, torch.Tensor], cfg: AttackConfig,
-                         seed: int) -> Dict[str, torch.Tensor]:
-    """Return a poisoned copy of ``state`` with Gaussian noise added and optional scaling."""
+def apply_gradient_noise(state: Dict[str, torch.Tensor], cfg: AttackConfig, seed: int):
+    """Return a poisoned copy of `state` with Gaussian noise added and optional scaling."""
     g = torch.Generator().manual_seed(seed)
     poisoned = OrderedDict()
     for k, v in state.items():
@@ -85,5 +77,5 @@ def apply_gradient_noise(state: Dict[str, torch.Tensor], cfg: AttackConfig,
     return poisoned
 
 
-def malicious_client_ids(roles: Dict[int, str]) -> List[int]:
+def malicious_client_ids(roles: Dict[int, str]):
     return sorted(roles.keys())

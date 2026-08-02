@@ -1,15 +1,12 @@
 """FedAvg aggregation over client updates."""
 from __future__ import annotations
-
 from collections import OrderedDict
 from typing import Dict, List, Tuple
-
 import torch
 
 
 def fedavg(updates: List[Tuple[Dict[str, torch.Tensor], int]]) -> Dict[str, torch.Tensor]:
     """Weighted average of client state_dicts, weighted by sample count.
-
     Args:
         updates: list of (state_dict, num_samples) for the participating clients.
     Returns:

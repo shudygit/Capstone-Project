@@ -1,13 +1,10 @@
 """Federated client: local SGD training, with optional poisoning behaviour."""
 from __future__ import annotations
-
 from typing import Dict, Optional, Tuple
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset
-
 from .attacks import LabelFlipDataset, apply_gradient_noise
 from .config import AttackConfig, FederatedConfig
 from .utils import clone_state
@@ -15,8 +12,7 @@ from .utils import clone_state
 
 class Client:
     """One simulated federated client owning a private data shard.
-
-    An honest client has ``attack_role=None``. A malicious client runs either
+    An honest client has attack_role=None. A malicious client runs either
     "label_flip" (trains on mislabelled data) or "gradient_noise" (perturbs its
     final weights).
     """
@@ -30,11 +26,11 @@ class Client:
         self.attack_cfg = attack_cfg
 
     @property
-    def is_malicious(self) -> bool:
+    def is_malicious(self):
         return self.attack_role is not None
 
     @property
-    def num_samples(self) -> int:
+    def num_samples(self):
         return len(self.dataset)
 
     def _train_dataset(self):
