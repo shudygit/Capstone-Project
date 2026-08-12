@@ -29,10 +29,10 @@ together resist poisoning attacks. It is evaluated with a controlled
 | iii | `blockchain_only`     | on  | on  | off | What the ledger alone adds (ii vs iii) |
 | iv  | `full_hybrid`         | on  | on  | on  | What the filter adds on top (iii vs iv) |
 
-**Representative result** (MNIST, 10 clients, 30 % malicious): baseline ~0.97,
-poisoned ~0.67, blockchain-only ~0.67 (identical accuracy, plus an audit trail and
-overhead), full hybrid ~0.95. The filter catches the statistically loud
-noise attack (detection rate for that attacker, zero false positives) while the
+**Representative result** (MNIST, 10 clients, 30 % malicious, seed 0): baseline
+~0.99, poisoned ~0.81, blockchain-only ~0.81 (identical accuracy, plus an audit
+trail and overhead), full hybrid ~0.99 (attack-success reduction ~0.99). The filter
+catches the statistically loud noise attack (zero false positives) while the
 stealthy label-flip attack remains hard to spot, which is an informative finding.
 
 ## Project layout
