@@ -6,9 +6,11 @@ University of Galway. Supervisor: Dr. Malika Bendechache.
 This repository implements a **hybrid defence** for Federated Averaging (FedAvg) on
 MNIST: a lightweight **blockchain ledger** plus a **z-score anomaly filter** that
 together resist poisoning attacks. It is evaluated with a controlled
-**four-scenario** design that isolates the contribution of each component.
+**four-scenario** design that isolates the contribution of each component, and then
+two further modules probe the filter's limits: a filter-aware **adaptive attacker**
+and a **temporal detector** that reads the blockchain's history to catch it.
 
-## The four modules
+## The modules
 
 - **Module 1 - FedAvg baseline.** Simulated clients collaboratively train a small
   CNN on MNIST, no attacks, no defences. The clean reference point.
@@ -19,6 +21,13 @@ together resist poisoning attacks. It is evaluated with a controlled
   a tamper-evident audit trail and an identity check. It audits, it does not filter.
 - **Module 4 - Z-score anomaly filter.** Before averaging, clients whose weights are
   statistical outliers versus the group are detected and dropped.
+- **Module 5 - Adaptive attacker + non-IID study.** A filter-aware attacker
+  (white-box / gray-box) that crafts updates staying just under the z-score
+  threshold, plus a sweep showing the filter's false positives rise under non-IID
+  data. See *Robustness analysis* below.
+- **Module 6 - Temporal ledger-anchored detector.** Reads the immutable ledger
+  history (a per-client CUSUM on an against-the-consensus signal) to catch the
+  adaptive attacker that the per-round filter misses.
 
 ## The four scenarios
 
@@ -39,7 +48,7 @@ stealthy label-flip attack remains hard to spot, which is an informative finding
 
 ```
 fedblock/                # the package
-├── config.py            # typed YAML config (experiment/data/model/federated/attack/blockchain/defense)
+├── config.py            # typed YAML config (all sections)
 ├── data.py              # offline MNIST + IID / Dirichlet partitioning
 ├── models.py            # SmallCNN, MLP
 ├── attacks.py           # label flipping + gradient-noise injection (module 2)
@@ -47,11 +56,15 @@ fedblock/                # the package
 ├── aggregator.py        # FedAvg
 ├── blockchain.py        # SHA-256 + RSA-2048 + Proof-of-Work ledger (module 3)
 ├── defense.py           # z-score anomaly filter (module 4)
+├── adaptive_attack.py   # filter-aware adaptive attacker (module 5)
+├── temporal_detector.py # ledger-history CUSUM detector (module 6)
 ├── metrics.py           # test-set evaluation + detection metrics
-└── server.py            # round orchestration + four-scenario logic
-configs/                 # one YAML per scenario (baseline, poisoned, blockchain_only, full_hybrid)
-scripts/                 # run_experiment, run_all, make_figures, make_tables
-tests/                   # unit (fedavg, attacks, blockchain, defense) + end-to-end smoke
+└── server.py            # round orchestration + four-scenario + adaptive/temporal logic
+configs/                 # scenario YAMLs: baseline, poisoned, blockchain_only, full_hybrid,
+                         #   noniid_hybrid, adaptive_hybrid, temporal_hybrid
+scripts/                 # run_experiment, run_all, make_figures, make_tables,
+                         #   sweep_noniid/adaptive/temporal (+ temporal_noniid) and their make_*_figures
+tests/                   # unit (fedavg, attacks, blockchain, defense, adaptive, temporal) + smoke
 ```
 
 ## Setup
