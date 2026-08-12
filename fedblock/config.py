@@ -56,6 +56,9 @@ class AttackConfig:
     # gradient / weight noise injection
     noise_sigma: float = 0.8         # std of Gaussian weight noise (clearly anomalous)
     noise_scale: float = 1.0         # multiplicative scaling of the update
+    # adaptive (filter-aware) attacker - novelty extension
+    adaptive_scale: float = 0.9      # crafts updates at |z| = scale * z_threshold (< 1 => evades)
+    adaptive_mode: str = "whitebox"  # "whitebox" (current-round stats) | "graybox" (previous round)
 
 
 @dataclass
@@ -72,6 +75,11 @@ class DefenseConfig:
     enabled: bool = False
     z_threshold: float = 2.5         # a weight is 'extreme' if |z-score| exceeds this (epsilon)
     fraction_threshold: float = 0.05  # flag a client if this fraction of its weights are extreme (tau)
+    # Temporal (history-based) detector - reads the blockchain ledger to catch a
+    # persistent adaptive attacker that the per-round filter above misses.
+    temporal: bool = False
+    temporal_warmup: int = 3         # rounds of history to accumulate before flagging
+    temporal_threshold: float = 3.0  # robust std-devs below the group to flag a client
 
 
 @dataclass
@@ -96,17 +104,21 @@ class Config:
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "Config":
-        kwargs: Dict[str, Any] = {}
-        for key, klass in cls._SECTIONS.items():
-            section = d.get(key, {}) or {}
-            unknown = set(section) - set(klass.__dataclass_fields__)
+        """Build a Config from a plain dict (parsed from YAML), section by section."""
+        sections = {}
+        for key, section_class in cls._SECTIONS.items():
+            values = d.get(key, {}) or {}          # this section's dict, or empty
+            # Catch typos: any key the dataclass does not define is rejected loudly.
+            allowed = set(section_class.__dataclass_fields__)
+            unknown = set(values) - allowed
             if unknown:
                 raise ValueError(f"Unknown keys in '{key}': {sorted(unknown)}")
-            kwargs[key] = klass(**section)
-        return cls(**kwargs)
+            sections[key] = section_class(**values)  # fill the dataclass
+        return cls(**sections)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {k: asdict(getattr(self, k)) for k in self._SECTIONS}
+        """The reverse of from_dict: turn this Config back into a plain dict."""
+        return {key: asdict(getattr(self, key)) for key in self._SECTIONS}
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:

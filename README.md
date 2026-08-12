@@ -102,10 +102,67 @@ false-positive rate of the filter, and a timing breakdown (training, blockchain,
 filter). Across scenarios: attack success reduction (how much of the lost accuracy
 the hybrid recovers).
 
+## Robustness analysis (novelty extensions)
+
+Two studies probe the limits of the z-score filter. These are the parts of the
+work with the clearest research contribution, and both were named as future work
+in the literature review.
+
+**A. Non-IID false positives.** As clients become more heterogeneous, honest
+updates diverge, so the filter starts flagging honest clients. `sweep_noniid.py`
+sweeps the Dirichlet `alpha` against the filter `tau` and measures the
+false-positive rate (on an honest-only cohort, to isolate the pure effect) and the
+detection rate under attack.
+
+```bash
+python scripts/sweep_noniid.py --alphas 5.0 1.0 0.3 0.1 0.05 --taus 0.02 0.05 0.1
+python scripts/make_noniid_figures.py
+```
+
+**B. Adaptive (filter-aware) attacker.** An attacker that knows the filter crafts
+updates bounded to `|z| = adaptive_scale x z_threshold`. With `adaptive_scale < 1`
+it is provably never flagged, yet it still biases the model. Two threat models are
+implemented: `whitebox` (uses the current round's honest statistics) and `graybox`
+(uses the previous round's). `sweep_adaptive.py` traces the evasion-vs-damage frontier.
+
+```bash
+python scripts/sweep_adaptive.py --scales 0.5 0.7 0.9 1.0 1.5 2.0 --modes whitebox graybox
+python scripts/make_adaptive_figures.py
+```
+
+Key finding: a lone adaptive attacker inflates the very standard deviation the
+filter uses to judge it, so it evades detection across a wide range of
+aggressiveness; its damage is nonetheless bounded because it must stay near the
+honest cohort. This motivates the temporal detector below.
+
+**C. Temporal ledger-anchored detector (depth component).** The per-round filter
+is stateless, so the adaptive attacker hides inside every single round. But it must
+lean against the honest majority in the same direction every round, and the
+blockchain has recorded all of them. The temporal detector (`fedblock/temporal_detector.py`)
+stores a one-number "against-the-consensus" signal per client on-chain, then adds
+each client's signal across the whole immutable ledger history (a CUSUM) and flags
+persistent low-side outliers with a robust median/MAD test. Bans are sticky, and
+the consensus is measured with the coordinate-wise median so strong attackers
+cannot corrupt the reference.
+
+```bash
+python scripts/sweep_temporal.py --scales 0.9 1.5 2.0 3.0
+python scripts/make_temporal_figures.py
+```
+
+Result: against the same adaptive attacker the per-round filter's accuracy falls
+from 0.97 to 0.23 as the attack strengthens (detection 0.00 throughout), while the
+temporal detector holds accuracy near 0.98 at every strength (detection rising to
+1.0 after a short warm-up, zero false positives). This turns the earlier negative
+result - a passive ledger adds no robustness - into a positive one: the ledger's
+immutable *history* is exactly what a defence needs to catch an adaptive attacker.
+This is an incremental combination, not a new idea (cf. FoolsGold, on-chain
+temporal reputation); its value is the specific pairing and the clean result.
+
 ## Tests
 
 ```bash
-make test        # 19 tests: fedavg, attacks, blockchain, filter, and end-to-end smoke
+make test        # 27 tests: fedavg, attacks, blockchain, filter, adaptive, temporal, smoke
 ```
 
 ## Roadmap (thesis modules)
@@ -114,6 +171,8 @@ make test        # 19 tests: fedavg, attacks, blockchain, filter, and end-to-end
 2. **Poisoning attacks** - label flipping + gradient-noise injection. Done.
 3. **Blockchain ledger** - SHA-256 hashes, RSA-2048 signatures, Proof-of-Work. Done.
 4. **Z-score anomaly filter** + the four-scenario evaluation. Done.
+5. **Robustness analysis** - non-IID false positives + adaptive (filter-aware) attacker. Done.
+6. **Temporal ledger-anchored detector** - history-based detection that catches the adaptive attacker. Done.
 
 ## AI-use disclosure
 

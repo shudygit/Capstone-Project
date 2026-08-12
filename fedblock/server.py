@@ -23,6 +23,7 @@ from typing import Dict, List
 
 import numpy as np
 
+from .adaptive_attack import compute_reference, craft_adaptive_update
 from .aggregator import fedavg
 from .attacks import assign_attack_roles
 from .blockchain import (Blockchain, KeyRegistry, LedgerRoundStats, Transaction,
@@ -34,6 +35,7 @@ from .data import (load_mnist, make_client_subsets, make_test_loader,
 from .defense import zscore_filter
 from .metrics import detection_metrics, evaluate
 from .models import build_model
+from .temporal_detector import deviation_signals, flag_from_ledger
 from .utils import clone_state, resolve_device, set_seed, state_to_bytes
 
 
@@ -82,6 +84,11 @@ class FederatedServer:
         self.model = build_model(cfg.model.name).to(self.device)
         self.global_state = clone_state(self.model.state_dict())
         self.history: List[Dict] = []
+        # Previous round's honest reference, used by a gray-box adaptive attacker.
+        self.prev_ref = None
+        # Clients the temporal detector has ever flagged. Ledger evidence only grows,
+        # so once a persistent attacker is identified it stays excluded.
+        self.temporal_banned: set = set()
 
     def _select_clients(self, round_idx: int) -> List[int]:
         frac = self.cfg.federated.client_fraction
@@ -91,11 +98,12 @@ class FederatedServer:
         rng = np.random.default_rng(self.cfg.experiment.seed + round_idx)
         return sorted(rng.choice(self.cfg.data.num_clients, size=n, replace=False).tolist())
 
-    def _record_on_ledger(self, round_idx: int,
-                          updates: Dict[int, Dict], sample_counts: Dict[int, int]):
+    def _record_on_ledger(self, round_idx: int, updates: Dict[int, Dict],
+                          sample_counts: Dict[int, int], signals: Dict[int, float]):
         """Sign, verify, hash and mine the round's updates. Returns (stats, accepted).
 
         'accepted' are the clients whose signature verified; only those go forward.
+        Each client's deviation signal is stored on-chain for the temporal detector.
         Timing is split by step so the overhead can be reported.
         """
         stats = LedgerRoundStats()
@@ -119,7 +127,8 @@ class FederatedServer:
             stats.verify_time += time.perf_counter() - t0
 
             txs.append(Transaction(cid, round_idx, weight_hash, sample_counts[cid],
-                                   signature.hex(), accepted=ok))
+                                   signature.hex(), accepted=ok,
+                                   deviation_signal=signals.get(cid, 0.0)))
             if ok:
                 accepted.append(cid)
             else:
@@ -132,27 +141,69 @@ class FederatedServer:
         stats.num_transactions = len(txs)
         return stats, accepted
 
+    def _collect_updates(self, participating: List[int], round_idx: int):
+        """Gather each client's update. Adaptive attackers are handled in a second
+        phase because they need the honest clients' statistics to craft with."""
+        cfg = self.cfg
+        adaptive_ids = [c for c in participating if self.roles.get(c) == "adaptive"]
+
+        updates: Dict[int, Dict] = {}
+        sample_counts: Dict[int, int] = {}
+
+        # Phase 1: everyone except adaptive attackers trains normally.
+        for cid in participating:
+            if cid in adaptive_ids:
+                continue
+            upd, n = self.clients[cid].local_train(
+                self.global_state, self.model, cfg.federated,
+                cfg.data.batch_size, self.device, round_idx)
+            updates[cid] = upd
+            sample_counts[cid] = n
+
+        # Phase 2: adaptive attackers craft filter-evading updates.
+        if adaptive_ids:
+            honest_ids = [c for c in participating if c not in self.malicious]
+            current_ref = (compute_reference(updates, honest_ids)
+                           if len(honest_ids) >= 2 else None)
+            # White-box uses the current round's stats; gray-box uses last round's.
+            if cfg.attack.adaptive_mode == "graybox":
+                ref = self.prev_ref if self.prev_ref is not None else current_ref
+            else:
+                ref = current_ref
+            for cid in adaptive_ids:
+                if ref is None:                     # not enough info yet: act honestly
+                    upd, n = self.clients[cid].local_train(
+                        self.global_state, self.model, cfg.federated,
+                        cfg.data.batch_size, self.device, round_idx)
+                else:
+                    upd = craft_adaptive_update(ref, self.global_state,
+                                                cfg.defense.z_threshold,
+                                                cfg.attack.adaptive_scale)
+                    n = self.clients[cid].num_samples
+                updates[cid] = upd
+                sample_counts[cid] = n
+            if current_ref is not None:
+                self.prev_ref = current_ref         # remember for a gray-box attacker
+        return updates, sample_counts
+
     def run_round(self, round_idx: int) -> Dict:
         cfg = self.cfg
         participating = self._select_clients(round_idx)
 
         # 1) Local training -------------------------------------------------
         t_train = time.perf_counter()
-        updates: Dict[int, Dict] = {}
-        sample_counts: Dict[int, int] = {}
-        for cid in participating:
-            upd, n = self.clients[cid].local_train(
-                self.global_state, self.model, cfg.federated,
-                cfg.data.batch_size, self.device, round_idx)
-            updates[cid] = upd
-            sample_counts[cid] = n
+        updates, sample_counts = self._collect_updates(participating, round_idx)
         train_time = time.perf_counter() - t_train
+
+        # Per-client deviation signals (used by the ledger + temporal detector).
+        signals = deviation_signals(updates, self.global_state)
 
         # 2) Blockchain logging (Module 3) ----------------------------------
         blockchain_time = 0.0
         candidates = list(updates.keys())
         if cfg.blockchain.enabled:
-            stats, accepted = self._record_on_ledger(round_idx, updates, sample_counts)
+            stats, accepted = self._record_on_ledger(round_idx, updates,
+                                                     sample_counts, signals)
             blockchain_time = stats.total_time
             candidates = accepted            # only signature-valid updates continue
 
@@ -167,6 +218,18 @@ class FederatedServer:
                 fraction_threshold=cfg.defense.fraction_threshold)
             defense_time = time.perf_counter() - t0
             flagged = result.flagged
+
+        # 3b) Temporal detector (novelty) - reads the ledger history --------
+        if cfg.defense.temporal and self.chain is not None:
+            t0 = time.perf_counter()
+            temporal_flagged = flag_from_ledger(
+                self.chain, warmup=cfg.defense.temporal_warmup,
+                threshold=cfg.defense.temporal_threshold)
+            defense_time += time.perf_counter() - t0
+            # Bans are sticky: ledger evidence never disappears, so a client caught
+            # once stays caught. A client flagged by either detector is dropped.
+            self.temporal_banned |= set(temporal_flagged)
+            flagged = sorted(set(flagged) | (self.temporal_banned & set(candidates)))
 
         keep = [c for c in candidates if c not in set(flagged)]
         if not keep:                          # safety net: never drop everyone

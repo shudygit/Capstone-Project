@@ -1,0 +1,44 @@
+# Full hybrid vs an ADAPTIVE (filter-aware) attacker - novelty extension.
+# The attacker knows the z-score filter and crafts updates bounded to
+# |z| = adaptive_scale * z_threshold, so with adaptive_scale < 1 it is never
+# flagged, yet still biases the model. scripts/sweep_adaptive.py sweeps the
+# aggressiveness and the threat model (white-box vs gray-box).
+experiment:
+  name: adaptive_hybrid
+  seed: 0
+  results_dir: ./results
+
+data:
+  dataset: mnist
+  data_root: ./data
+  num_clients: 10
+  partition: iid
+  dirichlet_alpha: 0.5
+  batch_size: 64
+  test_batch_size: 1000
+
+model:
+  name: small_cnn
+
+federated:
+  num_rounds: 30
+  local_epochs: 1
+  lr: 0.01
+  momentum: 0.9
+  client_fraction: 1.0
+  device: auto
+
+attack:
+  enabled: true
+  types: [adaptive]        # every malicious client is a filter-aware adaptive attacker
+  malicious_fraction: 0.3
+  adaptive_scale: 0.9      # < 1 => provably under the filter threshold
+  adaptive_mode: whitebox  # whitebox | graybox
+
+blockchain:
+  enabled: false
+
+defense:
+  enabled: true
+  z_threshold: 2.5
+  fraction_threshold: 0.05

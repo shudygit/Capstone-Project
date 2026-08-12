@@ -98,6 +98,9 @@ class Transaction:
     num_samples: int
     signature_hex: str        # the client's signature over weight_hash
     accepted: bool            # did the signature verify?
+    # How far this client leaned against the round's consensus. Stored on-chain so
+    # the temporal detector can read each client's history from the immutable ledger.
+    deviation_signal: float = 0.0
 
     def to_dict(self) -> Dict:
         return self.__dict__

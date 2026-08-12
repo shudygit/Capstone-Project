@@ -27,6 +27,9 @@ def _coerce(value: str):
     low = value.lower()
     if low in ("true", "false"):
         return low == "true"
+    if value.startswith("[") and value.endswith("]"):
+        inner = value[1:-1].strip()
+        return [s.strip() for s in inner.split(",")] if inner else []
     for cast in (int, float):
         try:
             return cast(value)

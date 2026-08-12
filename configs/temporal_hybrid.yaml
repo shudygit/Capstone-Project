@@ -1,0 +1,53 @@
+# Temporal detector vs the adaptive attacker - novelty depth component.
+# The per-round z-score filter (defense.enabled) is kept on but, as shown earlier,
+# it never catches the adaptive attacker. The temporal detector (defense.temporal)
+# reads the blockchain ledger's history and catches the attacker's persistent
+# against-the-consensus signature that no single round reveals.
+#
+# Compare this against configs/adaptive_hybrid.yaml (same attacker, temporal off):
+#   adaptive_hybrid -> detection rate 0.00 (per-round filter is blind)
+#   temporal_hybrid -> detection rises after the warm-up rounds
+experiment:
+  name: temporal_hybrid
+  seed: 0
+  results_dir: ./results
+
+data:
+  dataset: mnist
+  data_root: ./data
+  num_clients: 10
+  partition: iid
+  dirichlet_alpha: 0.5
+  batch_size: 64
+  test_batch_size: 1000
+
+model:
+  name: small_cnn
+
+federated:
+  num_rounds: 30
+  local_epochs: 1
+  lr: 0.01
+  momentum: 0.9
+  client_fraction: 1.0
+  device: auto
+
+attack:
+  enabled: true
+  types: [adaptive]
+  malicious_fraction: 0.3
+  adaptive_scale: 0.9
+  adaptive_mode: whitebox
+
+blockchain:
+  enabled: true             # the temporal detector needs the ledger history
+  difficulty: 2
+  rsa_key_bits: 2048
+
+defense:
+  enabled: true             # per-round z-score filter (blind to the adaptive attacker)
+  z_threshold: 2.5
+  fraction_threshold: 0.05
+  temporal: true            # history-based detector that reads the ledger
+  temporal_warmup: 3
+  temporal_threshold: 3.0

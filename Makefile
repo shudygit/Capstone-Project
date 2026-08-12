@@ -1,19 +1,19 @@
 PY ?= ./.venv/bin/python
 
-.PHONY: help install smoke run iid noniid poisoned all figures tables test clean
+.PHONY: help install smoke run iid noniid poisoned all figures tables \
+        sweep-noniid sweep-adaptive robustness test clean
 
 help:
-	@echo "make install   - create venv and install dependencies"
-	@echo "make smoke      - fast smoke run of all 4 scenarios (few rounds)"
-	@echo "make run        - full IID baseline (30 rounds)"
-	@echo "make iid        - IID baseline"
-	@echo "make noniid     - non-IID (Dirichlet) baseline"
-	@echo "make poisoned   - poisoned FedAvg (attacks, no defence)"
-	@echo "make all        - run all 4 scenarios + figures + summary table"
-	@echo "make figures    - build the four-scenario figures from results/"
-	@echo "make tables     - build the summary table (CSV + LaTeX) from results/"
-	@echo "make test       - run unit + smoke tests"
-	@echo "make clean      - remove results/ and figures/"
+	@echo "make install         - create venv and install dependencies"
+	@echo "make smoke            - fast smoke run of all 4 scenarios (few rounds)"
+	@echo "make run              - full IID baseline (30 rounds)"
+	@echo "make poisoned         - poisoned FedAvg (attacks, no defence)"
+	@echo "make all              - run all 4 scenarios + figures + summary table"
+	@echo "make sweep-noniid     - non-IID false-positive sweep + figures"
+	@echo "make sweep-adaptive   - adaptive-attacker frontier sweep + figure"
+	@echo "make robustness       - both novelty sweeps + their figures"
+	@echo "make test             - run all tests"
+	@echo "make clean            - remove results/ and figures/"
 
 install:
 	python3.12 -m venv .venv
@@ -45,6 +45,20 @@ figures:
 
 tables:
 	$(PY) scripts/make_tables.py
+
+sweep-noniid:
+	$(PY) scripts/sweep_noniid.py
+	$(PY) scripts/make_noniid_figures.py
+
+sweep-adaptive:
+	$(PY) scripts/sweep_adaptive.py
+	$(PY) scripts/make_adaptive_figures.py
+
+sweep-temporal:
+	$(PY) scripts/sweep_temporal.py
+	$(PY) scripts/make_temporal_figures.py
+
+robustness: sweep-noniid sweep-adaptive sweep-temporal
 
 test:
 	$(PY) -m pytest -q tests
