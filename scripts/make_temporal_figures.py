@@ -37,18 +37,19 @@ def main() -> None:
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 7), sharex=True)
     for defence in ["per_round", "temporal"]:
         d = (df[df["defence"] == defence]
-             .groupby("scale")[["final_acc", "mean_detection_rate"]]
+             .groupby("scale")[["final_acc", "mean_detection_rate", "post_warmup_detection_rate"]]
              .mean().reset_index().sort_values("scale"))
         if d.empty:
             continue
         ax1.plot(d["scale"], d["final_acc"], "o-", color=COLORS[defence],
                  linewidth=2, label=LABELS[defence])
-        ax2.plot(d["scale"], d["mean_detection_rate"], "o-", color=COLORS[defence],
+        dr_col = "post_warmup_detection_rate" if defence == "temporal" else "mean_detection_rate"
+        ax2.plot(d["scale"], d[dr_col], "o-", color=COLORS[defence],
                  linewidth=2, label=LABELS[defence])
 
     ax1.set_ylabel("Final accuracy")
     ax1.set_title("Ledger-history detector defeats the adaptive attacker")
-    ax2.set_ylabel("Mean detection rate")
+    ax2.set_ylabel("Detection rate (post-warm-up)")
     ax2.set_xlabel("adaptive_scale (attack aggressiveness)")
     ax2.set_ylim(-0.05, 1.05)
     for ax in (ax1, ax2):

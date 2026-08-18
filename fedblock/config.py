@@ -1,4 +1,4 @@
-"""Typed, YAML-backed configuration for the FedAvg baseline."""
+""" YAML-backed configuration for the FedAvg baseline."""
 from __future__ import annotations
 
 import copy
@@ -73,8 +73,16 @@ class BlockchainConfig:
 class DefenseConfig:
     """Module 4: z-score anomaly filter that drops outlier updates before averaging."""
     enabled: bool = False
+    # Which defence to run. "zscore" is ours; the other two are published methods
+    # re-implemented on this setup so the comparison is like-for-like.
+    #   "zscore"  - our z-score filter (mean/std)
+    #   "iqr"     - FedECPA: same idea using interquartile-range fences
+    #   "fltrust" - FLTrust: cosine trust against a server-held clean root dataset
+    method: str = "zscore"
     z_threshold: float = 2.5         # a weight is 'extreme' if |z-score| exceeds this (epsilon)
     fraction_threshold: float = 0.05  # flag a client if this fraction of its weights are extreme (tau)
+    iqr_k: float = 1.5               # IQR fence multiplier for the FedECPA comparison
+    fltrust_root_size: int = 100     # clean examples the server holds for FLTrust
     # Temporal (history-based) detector - reads the blockchain ledger to catch a
     # persistent adaptive attacker that the per-round filter above misses.
     temporal: bool = False
@@ -103,7 +111,7 @@ class Config:
     }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "Config":
+    def from_dict(cls, d: Dict[str, Any]):
         """Build a Config from a plain dict (parsed from YAML), section by section."""
         sections = {}
         for key, section_class in cls._SECTIONS.items():
@@ -116,12 +124,12 @@ class Config:
             sections[key] = section_class(**values)  # fill the dataclass
         return cls(**sections)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self):
         """The reverse of from_dict: turn this Config back into a plain dict."""
         return {key: asdict(getattr(self, key)) for key in self._SECTIONS}
 
 
-def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]):
     out = copy.deepcopy(base)
     for k, v in (override or {}).items():
         if isinstance(v, dict) and isinstance(out.get(k), dict):
@@ -131,7 +139,7 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
     return out
 
 
-def load_config(path: str, overrides: Optional[Dict[str, Any]] = None) -> Config:
+def load_config(path: str, overrides: Optional[Dict[str, Any]] = None):
     """Load a YAML config, optionally layered with CLI overrides."""
     with open(path) as f:
         data = yaml.safe_load(f) or {}

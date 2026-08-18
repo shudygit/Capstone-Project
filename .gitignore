@@ -16,3 +16,8 @@ data/MNIST/*
 !data/MNIST/raw/
 data/MNIST/raw/*
 !data/MNIST/raw/*.gz
+
+# Throwaway experiment output dirs (regenerated locally, like results/)
+results_eps/
+results_tmp3/
+results_tuned/

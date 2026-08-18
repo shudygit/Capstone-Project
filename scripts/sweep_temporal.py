@@ -46,12 +46,19 @@ def run(scale: float, temporal_on: bool, seed: int, rounds: int, device: str) ->
     })
     server = FederatedServer(cfg)
     hist = pd.DataFrame(server.run(verbose=False))
+    # The temporal detector needs cfg.defense.temporal_warmup rounds of ledger
+    # history before it can flag, so the first (warmup - 1) rounds are blind. The
+    # run-averaged detection rate therefore drops as run length shrinks; the
+    # post-warm-up rate is the detector's real operating value.
+    blind = max(0, cfg.defense.temporal_warmup - 1)
+    post = hist[hist["round"] >= blind]["detection_rate"]
     return {
         "defence": "temporal" if temporal_on else "per_round",
         "scale": scale,
         "seed": seed,
         "final_acc": float(hist["test_acc"].iloc[-1]),
         "mean_detection_rate": float(hist["detection_rate"].mean()),
+        "post_warmup_detection_rate": float(post.mean()) if len(post) else 0.0,
     }
 
 

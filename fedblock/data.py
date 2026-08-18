@@ -34,7 +34,6 @@ def _transform():
 
 def resolve_data_root(data_root: str):
     """Make ``data_root`` absolute, resolving relative paths against the project root.
-
     This means experiments work no matter which directory you launch them from.
     """
     if os.path.isabs(data_root):
@@ -57,7 +56,6 @@ def _ensure_extracted(raw_dir: str):
 
 def load_mnist(data_root: str):
     """Return the MNIST train and test datasets from local files only.
-
     Raises a clear error if the bundled dataset is missing, rather than silently
     attempting an online download.
     """

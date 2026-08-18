@@ -34,7 +34,6 @@ Reference = Dict[str, Tuple[torch.Tensor, torch.Tensor]]
 def compute_reference(updates: Dict[int, Dict[str, torch.Tensor]],
                       honest_ids: List[int], eps: float = 1e-8) -> Reference:
     """Per-weight mean and std across the honest clients' updates.
-
     This is the attacker's estimate of the cohort statistics the filter will use.
     """
     ref: Reference = OrderedDict()
@@ -51,7 +50,6 @@ def craft_adaptive_update(reference: Reference,
                           global_state: Dict[str, torch.Tensor],
                           z_threshold: float, scale: float) -> Dict[str, torch.Tensor]:
     """Build an evasive update bounded to |z| = scale * z_threshold on every weight.
-
     With scale < 1 the update is guaranteed to fall under the filter's threshold.
     """
     s = scale * z_threshold

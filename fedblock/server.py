@@ -26,10 +26,14 @@ import numpy as np
 from .adaptive_attack import compute_reference, craft_adaptive_update
 from .aggregator import fedavg
 from .attacks import assign_attack_roles
+from .baselines import (fltrust_aggregate, fltrust_scores, iqr_filter,
+                        train_root_model)
 from .blockchain import (Blockchain, KeyRegistry, LedgerRoundStats, Transaction,
                          sha256_hex, verify_signature)
 from .client import Client
 from .config import Config
+from torch.utils.data import DataLoader, Subset
+
 from .data import (load_mnist, make_client_subsets, make_test_loader,
                    partition_data)
 from .defense import zscore_filter
@@ -47,6 +51,12 @@ def scenario_name(cfg: Config) -> str:
         return "poisoned_nodefense"
     if cfg.blockchain.enabled and not cfg.defense.enabled:
         return "blockchain_only"
+    # Comparison runs against published defences carry their own label so the
+    # results files stay separable from our own hybrid.
+    if cfg.defense.method == "iqr":
+        return "fedecpa"
+    if cfg.defense.method == "fltrust":
+        return "fltrust"
     return "full_hybrid"
 
 
@@ -80,6 +90,22 @@ class FederatedServer:
             for cid in range(cfg.data.num_clients):
                 self.keys.register(cid)
             self.chain = Blockchain(difficulty=cfg.blockchain.difficulty)
+
+        # FLTrust needs a small clean dataset of its own. We take it from the tail
+        # of the training set, deterministically, and never from the test set.
+        self.root_client = None
+        if cfg.defense.enabled and cfg.defense.method == "fltrust":
+            n_root = min(cfg.defense.fltrust_root_size, len(train))
+            rng = np.random.default_rng(cfg.experiment.seed + 99991)
+            root_idx = rng.choice(len(train), size=n_root, replace=False).tolist()
+            self.root_loader = DataLoader(Subset(train, root_idx),
+                                          batch_size=cfg.data.batch_size, shuffle=True)
+            # Match the server's optimiser steps to an average client's, so the
+            # reference update is of comparable magnitude.
+            avg_shard = len(train) / cfg.data.num_clients
+            self.root_steps = max(1, int(
+                cfg.federated.local_epochs * -(-avg_shard // cfg.data.batch_size)))
+            self.root_client = True
 
         self.model = build_model(cfg.model.name).to(self.device)
         self.global_state = clone_state(self.model.state_dict())
@@ -207,19 +233,42 @@ class FederatedServer:
             blockchain_time = stats.total_time
             candidates = accepted            # only signature-valid updates continue
 
-        # 3) Z-score filter (Module 4) --------------------------------------
+        # 3) Defence (Module 4) 
+
         flagged: List[int] = []
         defense_time = 0.0
+        trust_scores = None
+        server_state = None
         if cfg.defense.enabled:
             t0 = time.perf_counter()
-            result = zscore_filter(
-                {c: updates[c] for c in candidates},
-                z_threshold=cfg.defense.z_threshold,
-                fraction_threshold=cfg.defense.fraction_threshold)
+            method = cfg.defense.method
+            if method == "zscore":
+                flagged = zscore_filter(
+                    {c: updates[c] for c in candidates},
+                    z_threshold=cfg.defense.z_threshold,
+                    fraction_threshold=cfg.defense.fraction_threshold).flagged
+            elif method == "iqr":
+                flagged = iqr_filter(
+                    {c: updates[c] for c in candidates},
+                    k=cfg.defense.iqr_k,
+                    fraction_threshold=cfg.defense.fraction_threshold).flagged
+            elif method == "fltrust":
+                # The server trains on its own clean root data to get a reference
+                # direction, then scores every client against it.
+                server_state = train_root_model(
+                    self.global_state, self.model, cfg.federated,
+                    self.root_loader, self.device, self.root_steps)
+                trust_scores = fltrust_scores(
+                    {c: updates[c] for c in candidates},
+                    self.global_state, server_state)
+                # A zero trust score means the client is excluded outright, which is
+                # the same decision the filters make, so it counts as a flag.
+                flagged = [c for c in candidates if trust_scores.get(c, 0.0) <= 0.0]
+            else:
+                raise ValueError(f"Unknown defense method '{method}'")
             defense_time = time.perf_counter() - t0
-            flagged = result.flagged
 
-        # 3b) Temporal detector (novelty) - reads the ledger history --------
+        # 3b) Temporal detector (novelty) - reads the ledger history (Module 5)
         if cfg.defense.temporal and self.chain is not None:
             t0 = time.perf_counter()
             temporal_flagged = flag_from_ledger(
@@ -235,12 +284,19 @@ class FederatedServer:
         if not keep:                          # safety net: never drop everyone
             keep = candidates
 
-        # 4) Aggregate + evaluate ------------------------------------------
-        self.global_state = fedavg([(updates[c], sample_counts[c]) for c in keep])
+        # 4) Aggregate + evaluate
+        if trust_scores is not None:
+            # FLTrust does not average equally: it weights by trust and rescales
+            # every update to the server's own magnitude.
+            self.global_state = fltrust_aggregate(
+                {c: updates[c] for c in keep}, self.global_state, server_state,
+                {c: trust_scores.get(c, 0.0) for c in keep})
+        else:
+            self.global_state = fedavg([(updates[c], sample_counts[c]) for c in keep])
         self.model.load_state_dict(self.global_state)
         acc, loss = evaluate(self.model, self.test_loader, self.device)
 
-        # 5) Detection metrics ---------------------------------------------
+        # 5) Detection metrics 
         det = detection_metrics(set(flagged), self.malicious, set(participating))
 
         record = {
